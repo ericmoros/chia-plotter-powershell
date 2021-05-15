@@ -265,7 +265,6 @@ function Plot-Or-Die {
     if ($parameters.hasToKillExistingJobs -eq $true) {
         $TaskManagerId = 1
         $TaskManagerCommand = "& $($parameters.chiaExe) plots create --tmp_dir $($parameters.temporal) --final_dir $($parameters.final) --num_threads $($parameters.threads) --buffer $($parameters.maxMemory) -p $($parameters.poolKey) -f $($parameters.farmerKey)"
-        $TaskManagerCommand = "& ping 192.168.0.254"
         $TaskManagerPrefix = "Chia"
         $TaskManagerGap = $parameters.gapMin
         $TaskManagerTotalTasks = $parameters.paralel
