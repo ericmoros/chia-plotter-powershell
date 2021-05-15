@@ -37,16 +37,16 @@ class Task : PlotterObject {
 
     [void] ExecuteCommand([int] $gap) {
         $this.Loop++
-        $this.StartDate = Get-Date
 
         $jobNameLoop = "$($this.JobName) - Loop $($this.Loop)"
 
         $this.job = Start-Job -Name $jobNameLoop -ArgumentList $this -Scriptblock {
             param($task)
             try {
+                Start-Sleep $task.Gap
+                $task.StartDate = Get-Date
                 Write-Host ($task | ConvertTo-Json -depth 1)
                 Invoke-Expression $task.Command
-                Start-Sleep 5
             }
             catch {
                 Write-Output "Job error"
@@ -265,6 +265,7 @@ function Plot-Or-Die {
     if ($parameters.hasToKillExistingJobs -eq $true) {
         $TaskManagerId = 1
         $TaskManagerCommand = "& $($parameters.chiaExe) plots create --tmp_dir $($parameters.temporal) --final_dir $($parameters.final) --num_threads $($parameters.threads) --buffer $($parameters.maxMemory) -p $($parameters.poolKey) -f $($parameters.farmerKey)"
+        $TaskManagerCommand = "& ping 192.168.0.254"
         $TaskManagerPrefix = "Chia"
         $TaskManagerGap = $parameters.gapMin
         $TaskManagerTotalTasks = $parameters.paralel
