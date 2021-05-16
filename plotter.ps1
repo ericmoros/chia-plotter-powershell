@@ -40,10 +40,10 @@ class Task : PlotterObject {
 
         $jobNameLoop = "$($this.JobName) - Loop $($this.Loop)"
 
-        $this.job = Start-Job -Name $jobNameLoop -ArgumentList $this -Scriptblock {
-            param($task)
+        $this.job = Start-Job -Name $jobNameLoop -ArgumentList $this, $gap -Scriptblock {
+            param($task, $gap)
             try {
-                Start-Sleep $task.Gap
+                Start-Sleep $gap
                 $task.StartDate = Get-Date
                 Write-Host ($task | ConvertTo-Json -depth 1)
                 Invoke-Expression $task.Command
@@ -130,7 +130,7 @@ class TaskManager : PlotterObject {
     [void] ExecuteTasks() {
         for ($i = 0; $i -lt $this._totalTasks; $i++) {
             [Task] $task = $this._tasks[$i]
-            $task.ExecuteCommand()
+            $task.ExecuteCommand($task.Gap)
         }
         # $tasks
     }
