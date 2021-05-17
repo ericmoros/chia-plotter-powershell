@@ -36,6 +36,10 @@ class Task : PlotterObject {
     [int] GetPercentage() {
         return $this.Messages.Count / 2626 * 100
     }
+
+    [void] AddMessages([string] $message) {
+        $this.Messages.Add($message)
+    }
     
     [void] AddMessages([object[]] $messages) {
         $this.Messages.AddRange($messages)
@@ -106,10 +110,11 @@ class Task : PlotterObject {
             $receiveMessages = Receive-Job $this.job
             $ErrorActionPreference = "Stop"
             if (-not($null -eq $receiveMessages)) {
-                Write-Host $receiveMessages
                 $this.Messages.AddRange($receiveMessages)
             }
-            Write-Host $this.GetStatus() -Fore White -Back DarkGray
+            Write-Host $this.GetStatus() -Fore White -Back DarkBlue
+            Write-Host $receiveMessages
+
         }
     }
 
