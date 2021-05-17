@@ -11,10 +11,12 @@ class Task : PlotterObject {
     [string] $JobName
     [string] $Command
     [string] $EventName
+    [System.Collections.ArrayList] $Messages = @()
     [int] $Gap = 0
     [int] $Loop = 0
     [DateTime] $StartDate
     [System.Management.Automation.Job] $Job
+    [System.Management.Automation.Job] $JobMessages
     [System.Management.Automation.PSEventJob] $Event
 
     Task(
@@ -31,6 +33,18 @@ class Task : PlotterObject {
         $this.Gap = $Gap
     }
 
+    [int] GetPercentage() {
+        return $this.Messages.Count / 2626 * 100
+    }
+    
+    [void] AddMessages([object[]] $messages) {
+        $this.Messages.AddRange($messages)
+    }
+
+    [void] CleanMessages() {
+        $this.Messages = @()
+    }
+    
     [void] ExecuteCommand() {
         $this.ExecuteCommand($this.Gap)
     }
@@ -39,13 +53,12 @@ class Task : PlotterObject {
         $this.Loop++
 
         $jobNameLoop = "$($this.JobName) - Loop $($this.Loop)"
-
         $this.job = Start-Job -Name $jobNameLoop -ArgumentList $this, $gap -Scriptblock {
             param($task, $gap)
             try {
                 Start-Sleep $gap
                 $task.StartDate = Get-Date
-                Write-Host ($task | ConvertTo-Json -depth 1)
+                #  Write-Host ($task | ConvertTo-Json -depth 1)
                 Invoke-Expression $task.Command
             }
             catch {
@@ -55,16 +68,15 @@ class Task : PlotterObject {
         }
 
         $eventNameLoop = "$($this.EventName) - Loop $($this.Loop)"
-
         $this.Event = Register-ObjectEvent $this.job -SourceIdentifier $eventNameLoop StateChanged -MessageData $this -Action {
             try {
                 $job = $sender
                 [Task] $task = $event.MessageData
                 # [Console]::Beep(1000, 500)
                 $jobState = $job.State
-                Write-Host "Event Job $($job.Name): $($jobState)" -Fore White -Back Red
+                Write-Host $task.GetStatus() -Fore White -Back Red
                 if ($jobState -eq "Completed") {
-                    Write-Host "$($event.MessageData.JobName) - Loop $($event.MessageData.Loop)"
+                    $task.CleanMessages()
                     Write-Host ""
                     $ErrorActionPreference = "Continue"
                     Receive-Job $job
@@ -74,13 +86,31 @@ class Task : PlotterObject {
                     $eventSubscriber.Action | Remove-Job
                     $task.ExecuteCommand(0)
                 }
-            }   catch {
+            }
+            catch {
                 Write-Output "Event error"
                 Write-Output $PSItem
             }
         } | Out-Null
 
-        Write-Host "Started $($this.job.Name): $($this.Command)"
+        Write-Host "Programed Job $($this.job.Name) with Gap $($this.Gap): $($this.Command)"
+    }
+
+    [string] GetStatus() {
+        return "$($this.job.Name) $($this.job.State) $($this.GetPercentage())%"
+    }
+
+    [void] Monitorice() {
+        if (-not ($this.job.State -eq "Completed" -or $this.job.State -eq "NotStarted")) {
+            $ErrorActionPreference = "Continue"
+            $receiveMessages = Receive-Job $this.job
+            $ErrorActionPreference = "Stop"
+            if (-not($null -eq $receiveMessages)) {
+                Write-Host $receiveMessages
+                $this.Messages.AddRange($receiveMessages)
+            }
+            Write-Host $this.GetStatus() -Fore White -Back DarkGray
+        }
     }
 
     [string] toString() {
@@ -134,6 +164,18 @@ class TaskManager : PlotterObject {
         }
         # $tasks
     }
+
+    [void] Monitorice() {
+        $tasks = $this._tasks
+        if ($null -eq $tasks) {
+            return
+        }
+        $tasks | Foreach-Object {
+            $task = [Task]$_
+            $task.Monitorice()
+            Start-Sleep 1
+        }
+    }
 }
 
 function Read-User-Parameters($defaultParameters) {
@@ -148,7 +190,7 @@ function Read-User-Parameters($defaultParameters) {
     # Asks user to kill current jobs
     $jobs = Get-Job
     $jobsCount = @($jobs).count
-    if($jobsCount -gt 0) {
+    if ($jobsCount -gt 0) {
         Write-Host ""
         Get-Job
 
@@ -171,18 +213,18 @@ function Read-User-Parameters($defaultParameters) {
     }
 
     return [pscustomobject]@{
-        hasToKillExistingJobs = $hasToKillExistingJobs
+        hasToKillExistingJobs    = $hasToKillExistingJobs
         hasToRemoveTemporalFiles = $hasToRemoveTemporalFiles
         #Not edited....
-        chiaExe = $defaultParameters.chiaExe
-        poolKey = $defaultParameters.poolKey
-        farmerKey = $defaultParameters.farmerKey
-        temporal = $defaultParameters.temporal
-        final = $defaultParameters.final
-        paralel = $defaultParameters.paralel
-        threads = $defaultParameters.threads
-        maxMemory = $defaultParameters.maxMemory
-        gapMin = $defaultParameters.gapMin
+        chiaExe                  = $defaultParameters.chiaExe
+        poolKey                  = $defaultParameters.poolKey
+        farmerKey                = $defaultParameters.farmerKey
+        temporal                 = $defaultParameters.temporal
+        final                    = $defaultParameters.final
+        paralel                  = $defaultParameters.paralel
+        threads                  = $defaultParameters.threads
+        maxMemory                = $defaultParameters.maxMemory
+        gapMin                   = $defaultParameters.gapMin
     }
 }
 
@@ -217,7 +259,7 @@ function Start-User-Parameters($hasToKillExistingJobs, $hasToRemoveTemporalFiles
     }
     if ($hasToRemoveTemporalFiles) {
         Write-Host "Removing files please wait..."
-        Get-ChildItem -Path $temporal -Include *.tmp -File -Recurse | ForEach-Object { $_.Delete()}
+        Get-ChildItem -Path $temporal -Include *.tmp -File -Recurse | ForEach-Object { $_.Delete() }
     }
 
     Write-Host ""
@@ -228,27 +270,6 @@ function Start-User-Parameters($hasToKillExistingJobs, $hasToRemoveTemporalFiles
     Write-Host "Lets fuck this drives"
     Write-Host ""
     Start-Sleep 1
-}
-
-function Show-Jobs {
-    Write-Host ""
-    Write-Host "Running..."
-    Write-Host "
-    "
-    while ($true) {
-        $jobs = Get-Job
-        $jobs | Foreach-Object {
-            $job = $_
-            if (-not ($job.State -eq "Completed" -or $job.State -eq "NotStarted")) {
-                Write-Host "$($job.Name) $($job.State)" -Fore White -Back Black
-                $ErrorActionPreference = "Continue"
-                Receive-Job $job
-                $ErrorActionPreference = "Stop"
-                Start-Sleep 1
-            }
-        }
-    }
-
 }
 
 
@@ -282,7 +303,9 @@ function Plot-Or-Die {
         Write-host $taskManager.toString()
         $taskManager.ExecuteTasks()
     }
-    Show-Jobs
+    while ($true) {
+        $taskManager.Monitorice()
+    }
 }
 
 
