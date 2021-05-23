@@ -6,6 +6,26 @@ class PlotterObject {
     }
 }
 
+class LogManager : PlotterObject {
+    
+    [string] $Path    
+
+    LogManager(
+        [string] $Path
+    ) {
+        $this.Path = $Path       
+    }
+    
+    [void] Write([String] $Message) {
+        $Message >> $this.Path
+    }
+}
+
+$LogDirPath = "log"
+New-Item -ItemType Directory -Force -Path $LogDirPath | Out-Null
+
+$global:Log = [LogManager]::new("$($LogDirPath)\\Plotter-$(Get-Date -Format "yyyyMMdd_hhmmss").log")
+
 class Task : PlotterObject {
     [int] $Id
     [string] $JobName
@@ -38,11 +58,18 @@ class Task : PlotterObject {
     }
 
     [void] AddMessages([string] $message) {
-        $this.Messages.Add($message)
+        $this.AddMessage($message)
+    }
+        
+    [void] AddMessages([object[]] $messages) {
+        $messages | Foreach-Object {
+            $message = [string]$_
+            $this.AddMessage($message)
+        }
     }
     
-    [void] AddMessages([object[]] $messages) {
-        $this.Messages.AddRange($messages)
+    [void] AddMessage([string] $message) {
+        $this.Messages.Add("$message")        
     }
 
     [void] CleanMessages() {
@@ -83,8 +110,21 @@ class Task : PlotterObject {
                     $task.CleanMessages()
                     Write-Host ""
                     $ErrorActionPreference = "Continue"
-                    Receive-Job $job
+                    $receiveMessages = Receive-Job $job
                     $ErrorActionPreference = "Stop"
+
+                    if (-not($null -eq $receiveMessages)) {
+                            $task.AddMessages($receiveMessages)
+                    }
+
+                    $status = $task.GetStatus()
+
+                    $global:Log.Write($status)
+                    Write-Host $status -Fore White -Back DarkBlue
+
+                    $global:Log.Write($receiveMessages)
+                    Write-Host $receiveMessages
+                    
                     Remove-Job $job.Id
                     $eventSubscriber | Unregister-Event
                     $eventSubscriber.Action | Remove-Job
@@ -101,7 +141,7 @@ class Task : PlotterObject {
     }
 
     [string] GetStatus() {
-        return "$($this.job.Name) $($this.job.State) $($this.GetPercentage())%"
+        return "$($this.job.Name) $($this.job.State) - $(Get-Date -Format "dd/MM/yyyy HH:mm:ss") - $($this.GetPercentage())%"
     }
 
     [void] Monitorice() {
@@ -109,12 +149,18 @@ class Task : PlotterObject {
             $ErrorActionPreference = "Continue"
             $receiveMessages = Receive-Job $this.job
             $ErrorActionPreference = "Stop"
-            if (-not($null -eq $receiveMessages)) {
-                $this.Messages.AddRange($receiveMessages)
-            }
-            Write-Host $this.GetStatus() -Fore White -Back DarkBlue
-            Write-Host $receiveMessages
 
+            if (-not($null -eq $receiveMessages)) {
+                    $this.AddMessages($receiveMessages)
+            }
+
+            $status = $this.GetStatus()
+
+            $global:Log.Write($status)
+            Write-Host $status -Fore White -Back DarkBlue
+
+            $global:Log.Write($receiveMessages)
+            Write-Host $receiveMessages
         }
     }
 
@@ -171,6 +217,7 @@ class TaskManager : PlotterObject {
     }
 
     [void] Monitorice() {
+        Start-Sleep 1
         $tasks = $this._tasks
         if ($null -eq $tasks) {
             return
@@ -277,9 +324,7 @@ function Start-User-Parameters($hasToKillExistingJobs, $hasToRemoveTemporalFiles
     Start-Sleep 1
 }
 
-
 function Plot-Or-Die {
-    # $logParentPath = "."
     $configFile = 'config.json'
 
     $defaultParameters = Get-Content -Raw $configFile | ConvertFrom-Json
