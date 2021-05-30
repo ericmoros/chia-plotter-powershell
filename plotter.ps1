@@ -114,7 +114,7 @@ class Task : PlotterObject {
                     $ErrorActionPreference = "Stop"
 
                     if (-not($null -eq $receiveMessages)) {
-                            $task.AddMessages($receiveMessages)
+                        $task.AddMessages($receiveMessages)
                     }
 
                     $status = $task.GetStatus()
@@ -151,7 +151,7 @@ class Task : PlotterObject {
             $ErrorActionPreference = "Stop"
 
             if (-not($null -eq $receiveMessages)) {
-                    $this.AddMessages($receiveMessages)
+                $this.AddMessages($receiveMessages)
             }
 
             $status = $this.GetStatus()
@@ -230,88 +230,128 @@ class TaskManager : PlotterObject {
     }
 }
 
-function Read-User-Parameters($defaultParameters) {
-    if ($defaultParameters.useDefaultParameters) {
-        return $defaultParameters
-    }
-
-    $hasToKillExistingJobs = $false
-    $hasToRemoveTemporalFiles = $false
-
-
-    # Asks user to kill current jobs
-    $jobs = Get-Job
-    $jobsCount = @($jobs).count
-    if ($jobsCount -gt 0) {
-        Write-Host ""
-        Get-Job
-
-        $userInput = Read-Host -Prompt "kill all jobs? (y/any)"
-        $userInput = $userInput.ToLower()
-        if ($userInput -eq "y") {
-            Write-Host "We will kill the jobs with suffering"
-            $hasToKillExistingJobs = $true
+function Read-Config-Parameters($configFile) {
+    $defaultParameters = Get-Content -Raw $configFile | ConvertFrom-Json
+    foreach ($globalProperty in $defaultParameters.globalOptions | Get-Member -MemberType NoteProperty) {
+        $globalKey = $globalProperty.Name
+        $globalValue = $defaultParameters.globalOptions | Select-Object -ExpandProperty $globalKey
+        foreach ($plot in $defaultParameters.plots) {
+            $hasPlotKey = (($plot | Get-Member -MemberType NoteProperty) | Select -ExpandProperty Name) -contains $globalKey
+            if (-not $hasPlotKey) {
+                $plot | Add-Member -Name $globalKey -Type NoteProperty -Value $globalValue
+            }
         }
     }
+    $defaultParameters.plots = $defaultParameters.plots | Where-Object { $_.enabled }
 
-    Write-Host ""
+    # $parameters | ConvertTo-Json -depth 100 | Out-File $configFile
+    return $defaultParameters
+}
 
-    # Asks user to remove temporal files
-    $userInput = Read-Host -Prompt "Delete all contents from temporal path? (y/any): $($temporal)"
-    $userInput = $userInput.ToLower()
-    if ($userInput -eq "y") {
-        Write-Host "That little files, will never forget the delete"
-        $hasToRemoveTemporalFiles = $true
+function Read-User-Parameters($defaultParameters) {
+    foreach ($plot in $defaultParameters.plots) {
+        if ($plot.useDefaultParameters) {
+            continue    
+        }
+        
+        $parameters = $plot
+        
+        $hasToKillExistingJobs = $false
+        $hasToRemoveTemporalFiles = $false
+        
+        
+        # Asks user to kill current jobs
+        $jobs = Get-Job
+        $jobsCount = @($jobs).count
+        if ($jobsCount -gt 0) {
+            Write-Host ""
+            Get-Job
+        
+            $userInput = Read-Host -Prompt "kill all jobs? (y/any)"
+            $userInput = $userInput.ToLower()
+            if ($userInput -eq "y") {
+                Write-Host "We will kill the jobs with suffering"
+                $hasToKillExistingJobs = $true
+            }
+        }
+        
+        Write-Host ""
+        
+        # Asks user to remove temporal files
+        $userInput = Read-Host -Prompt "Delete all contents from temporal path? (y/any): $($temporal)"
+        $userInput = $userInput.ToLower()
+        if ($userInput -eq "y") {
+            Write-Host "That little files, will never forget the delete"
+            $hasToRemoveTemporalFiles = $true
+        }
+        
+        $parameters.hasToKillExistingJobs = $hasToKillExistingJobs
+        $parameters.hasToRemoveTemporalFiles = $hasToRemoveTemporalFiles
     }
 
-    return [pscustomobject]@{
-        hasToKillExistingJobs    = $hasToKillExistingJobs
-        hasToRemoveTemporalFiles = $hasToRemoveTemporalFiles
-        #Not edited....
-        chiaExe                  = $defaultParameters.chiaExe
-        poolKey                  = $defaultParameters.poolKey
-        farmerKey                = $defaultParameters.farmerKey
-        temporal                 = $defaultParameters.temporal
-        final                    = $defaultParameters.final
-        paralel                  = $defaultParameters.paralel
-        threads                  = $defaultParameters.threads
-        maxMemory                = $defaultParameters.maxMemory
-        gapMin                   = $defaultParameters.gapMin
-    }
+    return $defaultParameters
 }
 
 function Test-User-Parameters($parameters) {
-    if (-not(Test-Path -Path $parameters.chiaExe -PathType Leaf)) {
-        Write-Warning "$($parameters.chiaExe)"
-        Write-Error "`$chiaExe does not exists"    
-    }
-    if (-not(Test-Path -Path $parameters.temporal)) {
-        Write-Warning "$($parameters.parameters.temporal)"
-        Write-Error "`$parameters.temporal does not exists"    
-    }
-    if (-not(Test-Path -Path $parameters.final)) {
-        Write-Warning "$($parameters.final)"
-        Write-Error "`$final does not exists"    
+    foreach ($plot in $parameters.plots) {
+        if (-not(Test-Path -Path $plot.chiaExe -PathType Leaf)) {
+            Write-Warning "$($plot.chiaExe)"
+            Write-Error "`$chiaExe does not exists"    
+        }
+
+        if (-not(Test-Path -Path $plot.temporal)) {
+            Write-Warning "$($plot.temporal)"
+            $userInput = Read-Host -Prompt "Create temporal directory? (y/any)"
+            $userInput = $userInput.ToLower()
+            if ($userInput -eq "y") {
+                New-Item -ItemType directory -Path $plot.temporal
+                Write-Host "`$plot.temporal created!"
+            }
+            else {
+                Write-Error "`$plot.temporal does not exists"
+            }
+        }
+
+        if (-not(Test-Path -Path $plot.final)) {
+            Write-Warning "$($plot.final)"
+            $userInput = Read-Host -Prompt "kill all jobs? (y/any)"
+            $userInput = $userInput.ToLower()
+            if ($userInput -eq "y") {
+                New-Item -ItemType directory -Path $plot.temporal
+                Write-Host "`$plot.final created!"
+            }
+            else {
+                Write-Error "`$plot.final does not exists"
+            }
+        }
     }
 }
 
-function Start-User-Parameters($hasToKillExistingJobs, $hasToRemoveTemporalFiles) {
+function Start-User-Parameters($parameters) {
 
     Write-Host ""
     Write-Host "MUAAJAJAJA..."
     Write-Host ""
 
     # Executing parameters
-    if ($hasToKillExistingJobs) {
-        Write-Host "Killing jobs please wait..."
+    if ($parameters.hasToKillExistingJobs) {
         Get-EventSubscriber | Unregister-Event
-        Get-job | Stop-Job
-        Get-job | Remove-Job
+        $jobs = Get-job
+        if (-not $jobs -eq $null) {
+            Write-Host "Killing jobs please wait..."
+            $jobs | Stop-Job
+            $jobs | Remove-Job
+        }
         
     }
-    if ($hasToRemoveTemporalFiles) {
-        Write-Host "Removing files please wait..."
-        Get-ChildItem -Path $temporal -Include *.tmp -File -Recurse | ForEach-Object { $_.Delete() }
+    foreach ($plot in $parameters.plots) {
+        if ($plot.hasToRemoveTemporalFiles) {
+            $files = Get-ChildItem -Path $plot.temporal -Include *.tmp -File -Recurse
+            if ($files.Count -gt 0) {
+                Write-Host "Removing $($files.Count) files from $($plot.temporal) please wait..."
+                $files | ForEach-Object { $_.Delete() }
+            }
+        }
     }
 
     Write-Host ""
@@ -326,19 +366,20 @@ function Start-User-Parameters($hasToKillExistingJobs, $hasToRemoveTemporalFiles
 
 function Plot-Or-Die {
     $configFile = 'config.json'
-
-    $defaultParameters = Get-Content -Raw $configFile | ConvertFrom-Json
+    $defaultParameters = Read-Config-Parameters $configFile
     $parameters = Read-User-Parameters $defaultParameters
     Test-User-Parameters $parameters
-    $parameters | ConvertTo-Json -depth 100 | Out-File $configFile
-    Start-User-Parameters $parameters.hasToKillExistingJobs $parameters.hasToRemoveTemporalFiles
+    Start-User-Parameters $parameters
+    [System.Collections.ArrayList] $taskManagers = @()
 
-    if ($parameters.hasToKillExistingJobs -eq $true) {
-        $TaskManagerId = 1
-        $TaskManagerCommand = "& $($parameters.chiaExe) plots create --tmp_dir $($parameters.temporal) --final_dir $($parameters.final) --num_threads $($parameters.threads) --buffer $($parameters.maxMemory) -p $($parameters.poolKey) -f $($parameters.farmerKey)"
-        $TaskManagerPrefix = "Chia"
-        $TaskManagerGap = $parameters.gapMin
-        $TaskManagerTotalTasks = $parameters.paralel
+
+    for ($i = 0; $i -lt $parameters.plots.Count; $i++) {
+        $plot = $parameters.plots[$i]
+        $TaskManagerId = $i + 1
+        $TaskManagerCommand = "& $($plot.chiaExe) plots create --tmp_dir $($plot.temporal) --final_dir $($plot.final) --num_threads $($plot.threads) --buffer $($plot.maxMemory) -p $($plot.poolKey) -f $($plot.farmerKey)"
+        $TaskManagerPrefix = "Task $($TaskManagerId) - $($plot.prefix)"
+        $TaskManagerGap = $plot.gapMin
+        $TaskManagerTotalTasks = $plot.paralel
     
         $taskManager = [TaskManager]::new(
             $TaskManagerId,
@@ -347,14 +388,19 @@ function Plot-Or-Die {
             $TaskManagerGap,
             $TaskManagerTotalTasks
         )
+
+        $taskManagers.Add($taskManager)
     
         $taskManager.LoadTasks()
     
         Write-host $taskManager.toString()
         $taskManager.ExecuteTasks()
     }
+
     while ($true) {
-        $taskManager.Monitorice()
+        foreach ($taskManager in $taskManagers) {
+            $taskManager.Monitorice()
+        }
     }
 }
 
